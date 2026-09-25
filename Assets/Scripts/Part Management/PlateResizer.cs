@@ -52,7 +52,7 @@ namespace Protobot {
             // ── Replace hole colliders ────────────────────────────────────────
             foreach (var h in part.GetComponentsInChildren<HoleCollider>()) {
                 for (int i = h.detectors.Count - 1; i >= 0; i--)
-                    h.detectors[i].RemoveHole(h);
+                    h.detectors[i].RemoveHole(h.Record);
                 Object.Destroy(h.gameObject);
             }
 

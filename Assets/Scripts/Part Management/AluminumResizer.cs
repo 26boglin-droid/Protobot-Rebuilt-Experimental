@@ -56,7 +56,7 @@ namespace Protobot {
             // Disconnect snap connections first so no HoleDetectors are orphaned.
             foreach (var h in part.GetComponentsInChildren<HoleCollider>()) {
                 for (int i = h.detectors.Count - 1; i >= 0; i--)
-                    h.detectors[i].RemoveHole(h);
+                    h.detectors[i].RemoveHole(h.Record);
                 Object.Destroy(h.gameObject);
             }
             // GenerateHoles uses Instantiate(obj, worldPos, worldRot, parent) so it
