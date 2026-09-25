@@ -20,6 +20,7 @@ namespace Protobot {
         private int Width => int.Parse(param2.value);
 
         private int HoleCount => Length * Width;
+        private readonly Dictionary<Vector2Int, Mesh> meshCache = new Dictionary<Vector2Int, Mesh>();
 
         private float GetPos(int val, int max) => 0.5f * ((-max + 1) / 2f + val);
 
@@ -34,6 +35,8 @@ namespace Protobot {
         /// generator's param fields do not need to be mutated.
         /// </summary>
         public Mesh GetMesh(int length, int width) {
+            var key = new Vector2Int(length, width);
+            if (meshCache.TryGetValue(key, out var cached) && cached != null) return cached;
             CombineInstance[] combine = new CombineInstance[length * width];
 
             var i = 0;
@@ -60,11 +63,16 @@ namespace Protobot {
 
             newMesh.CombineMeshes(combine);
             newMesh.RecalculateNormals();
+            if (length >= 1 && length <= 25 && width >= 1 && width <= 5) meshCache[key] = newMesh;
 
             return newMesh;
         }
 
         // ── Part generation ──────────────────────────────────────────────────────
+        private void OnDestroy() {
+            foreach (var mesh in meshCache.Values) if (mesh != null) Destroy(mesh);
+            meshCache.Clear();
+        }
 
         public override GameObject Generate(Vector3 position, Quaternion rotation) {
             var newPart = new GameObject("Plate (" + Length + "x" + Width + ")");
@@ -122,7 +130,7 @@ namespace Protobot {
 
                     var rot = plateHole.transform.rotation;
 
-                    Instantiate(plateHole.gameObject, pos, rot, obj.transform);
+                    PartHoles.AddTemplate(obj, plateHole, pos, rot);
                 }
             }
         }

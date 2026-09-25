@@ -43,6 +43,8 @@ namespace Protobot.Tools {
 
         [SerializeField] private Camera refCamera = null;
         [SerializeField] private VectorLink rotVectorLink;
+        [SerializeField] private bool snapRotation;
+        [SerializeField] private float snapAngle = 15f;
 
         private Vector3 initRotVector;   // rotation axis captured at drag start
         private Vector3 initMouseVector; // mouse-to-ring-center at drag start
@@ -62,6 +64,8 @@ namespace Protobot.Tools {
         /// Uses the new Input System — NOT the old Input.GetKey.
         /// </summary>
         private float GetSnapIncrement() {
+            if (snapRotation && snapAngle > 0f) return snapAngle;
+
             var kb = Keyboard.current;
             if (kb != null && (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed)) return 15f;
             if (kb != null && (kb.leftCtrlKey.isPressed  || kb.rightCtrlKey.isPressed))  return 5f;

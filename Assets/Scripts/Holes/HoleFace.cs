@@ -25,22 +25,23 @@ namespace Protobot {
         // Stored so Update() can recalculate the correct face direction as the part rotates.
         private float dirSign = 1f;
 
+        private void OnEnable() => ViewportPresentation.Changed();
+        private void OnDisable() => ViewportPresentation.Changed();
+
         public void Set(HoleData newHole, Vector3 newDir) {
-            transform.rotation = Quaternion.LookRotation(-newDir, newHole.rotation * Vector3.up);
-
-            Vector3 newHolePos = newHole.position;
-            Vector3 newPos = newHolePos + (newDir * (newHole.depth / 2));
-            transform.position = newPos;
-
-            direction = newDir;
-
-            // Record which side of the hole we're on (along or against hole.forward)
-            // so Update() can keep direction correct as hole.forward rotates with the part.
+            var pose = transform;
+            var rotation = Quaternion.LookRotation(-newDir, newHole.rotation * Vector3.up);
+            var newPos = newHole.position + newDir * (newHole.depth / 2);
+            var scale = new Vector3(newHole.size.x, newHole.size.y, 0.001f);
+            bool moved = pose.rotation != rotation || pose.position != newPos;
+            bool resized = pose.localScale != scale;
+            bool reshaped = meshFilter.sharedMesh != newHole.shape;
+            if (hole != newHole || direction != newDir || moved || resized || reshaped) ViewportPresentation.Changed();
+            if (moved) pose.SetPositionAndRotation(newPos, rotation);
+            if (resized) pose.localScale = scale;
+            if (reshaped) meshFilter.sharedMesh = newHole.shape;
             dirSign = Vector3.Dot(newDir, newHole.forward) >= 0f ? 1f : -1f;
-
-            meshFilter.mesh = newHole.shape;
-            transform.localScale = new Vector3(newHole.size.x, newHole.size.y, 0.001f);
-
+            direction = newDir;
             hole = newHole;
         }
 

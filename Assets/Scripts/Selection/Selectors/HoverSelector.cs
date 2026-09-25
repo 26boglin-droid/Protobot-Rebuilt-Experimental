@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Protobot.ChainSystem;
 
 namespace Protobot.SelectionSystem {
     public class HoverSelector : Selector {
@@ -9,6 +10,7 @@ namespace Protobot.SelectionSystem {
         [SerializeField] private bool checkPrevObj;
 
         private GameObject prevObj;
+        private HoleRecord prevHole;
 
         /// <summary>
         /// When true, the per-frame clear-event is not fired while the mouse
@@ -19,10 +21,10 @@ namespace Protobot.SelectionSystem {
         public static bool SuppressClear { get; set; } = false;
 
         public void Update() {
-            GameObject mouseCastObj = mouseCast.gameObject;
+            GameObject mouseCastObj = ChainManager.ResolveSelectableObject(mouseCast.gameObject);
 
             if (mouseCastObj != null) {
-                if (prevObj != mouseCastObj || !checkPrevObj) {
+                if (prevObj != mouseCastObj || prevHole != mouseCast.HoverHole || !checkPrevObj) {
                     var selection = new ObjectSelection {
                         gameObject = mouseCastObj,
                         selector = this
@@ -35,6 +37,7 @@ namespace Protobot.SelectionSystem {
                 clearEvent?.Invoke();
 
             prevObj = mouseCastObj;
+            prevHole = mouseCast.HoverHole;
         }
     }
 }

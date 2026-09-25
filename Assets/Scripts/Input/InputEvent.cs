@@ -23,24 +23,37 @@ namespace Protobot.InputEvents {
         public static bool SuppressAll { get; set; }
 
         private bool prevPressStatus = false;
+        private bool missingDefaultActionLogged = false;
 
         public void Awake() {
             //performed += () => Debug.Log("Performed " + name + " input event!");
 
             rebindAction = new RebindAction(name);
 
-            rebindAction.OnCompleteRebind += () => defaultAction.Disable();
-            rebindAction.OnSaveRebinds += () => defaultAction.Disable();
-
-            rebindAction.OnResetRebinds += () => defaultAction.Enable();
-
-            rebindAction.OnLoadRebinds += hasRebinds => {
-                if (hasRebinds) {
+            rebindAction.OnCompleteRebind += () => {
+                if (defaultAction != null) {
+                    defaultAction.Disable();
+                }
+            };
+            rebindAction.OnSaveRebinds += () => {
+                if (defaultAction != null) {
                     defaultAction.Disable();
                 }
             };
 
-            if (rebindAction.IsEmpty) {
+            rebindAction.OnResetRebinds += () => {
+                if (defaultAction != null) {
+                    defaultAction.Enable();
+                }
+            };
+
+            rebindAction.OnLoadRebinds += hasRebinds => {
+                if (hasRebinds && defaultAction != null) {
+                    defaultAction.Disable();
+                }
+            };
+
+            if (rebindAction.IsEmpty && defaultAction != null) {
                 defaultAction.Enable();
             }
         }
@@ -49,13 +62,21 @@ namespace Protobot.InputEvents {
             if (SuppressAll || RebindAction.Rebinding) {
                 // Keep prevPressStatus tracking the real key state so we don't
                 // fire a spurious performed/canceled event the frame suppression ends.
-                prevPressStatus = defaultAction.AllControlsPressed()
-                                  || rebindAction.action.AllControlsPressed();
+                prevPressStatus = (defaultAction != null && defaultAction.AllControlsPressed())
+                                  || (rebindAction != null && rebindAction.action != null && rebindAction.action.AllControlsPressed());
                 IsPressed = false;
                 return;
             }
 
-            IsPressed = defaultAction.AllControlsPressed() || rebindAction.action.AllControlsPressed();
+            if (defaultAction == null && !missingDefaultActionLogged) {
+                Debug.LogWarning($"InputEvent '{name}' has no default action assigned.", this);
+                missingDefaultActionLogged = true;
+            }
+
+            bool defaultPressed = defaultAction != null && defaultAction.AllControlsPressed();
+            bool reboundPressed = rebindAction != null && rebindAction.action != null && rebindAction.action.AllControlsPressed();
+
+            IsPressed = defaultPressed || reboundPressed;
 
             if (IsPressed != prevPressStatus) {
                 if (IsPressed)
@@ -68,12 +89,14 @@ namespace Protobot.InputEvents {
         }
 
         public void OnDisable() {
-            defaultAction.Disable();
+            if (defaultAction != null) {
+                defaultAction.Disable();
+            }
         }
         
         public string GetCurrentKeybind()
         {
-            return defaultAction.GetBindingDisplayString();
+            return defaultAction != null ? defaultAction.GetBindingDisplayString() : string.Empty;
         }
         
         public bool IsKeyPressed(string keyName)

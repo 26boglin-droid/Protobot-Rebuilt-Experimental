@@ -1,9 +1,10 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+using System.Collections;
 using UnityEngine;
 using System;
 using System.Linq;
-using UnityEditor;
+using System.Collections.Generic;
+using Protobot.ChainSystem;
+using Protobot.CustomParts;
 
 namespace Protobot.Builds {
     public static class SceneBuild {
@@ -31,6 +32,12 @@ namespace Protobot.Builds {
             Debug.Log("Generating a build with " +
                       (buildData.parts == null ? 0 : buildData.parts.Length) + " parts");
 
+            CustomPartRegistry.Clear();
+            if (buildData.customDefinitions != null && buildData.customDefinitions.Length > 0) {
+                CustomPartRegistry.RegisterDefinitions(buildData.customDefinitions);
+            }
+
+            ChainManager.ClearAll();
             PartsManager.DestroyLoadedObjects();
 
             //Camera Data
@@ -39,7 +46,8 @@ namespace Protobot.Builds {
             Vector3 savedCamPos = new Vector3((float)camData.xPos, (float)camData.yPos, (float)camData.zPos);
             Vector3 savedCamAngle = new Vector3((float)camData.xRot, (float)camData.yRot, (float)camData.zRot);
 
-            PivotCamera.Main.SetTransform(savedCamPos, savedCamAngle, (float)camData.zoom);
+            PivotCamera.Main.SetTransform(savedCamPos, savedCamAngle,
+                PivotCamera.Main.DistanceFromSavedZoom((float)camData.zoom, camData.isOrtho));
 
             var projectionSwitcher = PivotCamera.Main.GetComponent<ProjectionSwitcher>();
 
@@ -50,19 +58,52 @@ namespace Protobot.Builds {
 
             //Parts
             if (buildData.parts != null) {
-                List<ObjectData> connectingObjects = new();
+                Dictionary<int, GameObject> generatedObjects = new Dictionary<int, GameObject>();
+                List<KeyValuePair<int, ObjectData>> connectingObjects = new List<KeyValuePair<int, ObjectData>>();
 
-                foreach (ObjectData part in buildData.parts) {
+                for (int i = 0; i < buildData.parts.Length; i++) {
+                    ObjectData part = buildData.parts[i];
                     if (part.partId == "Error") continue; //this is jank but I'm avoiding editing main scene
-                    if (PartsManager.GetPartType(part.partId).connectingPart) {
-                        connectingObjects.Add(part);
+                    bool isCustomPart = !string.IsNullOrWhiteSpace(part.customDefinitionId);
+                    if (isCustomPart) {
+                        GameObject generatedCustom = GenerateObject(part, buildData);
+                        if (generatedCustom != null) {
+                            generatedObjects[i] = generatedCustom;
+                        }
+
+                        continue;
                     }
-                    else
-                        GenerateObject(part, buildData);
+
+                    PartType partType = PartsManager.GetPartType(part.partId);
+                    if (partType == null) {
+                        continue;
+                    }
+
+                    if (partType.connectingPart) {
+                        connectingObjects.Add(new KeyValuePair<int, ObjectData>(i, part));
+                    }
+                    else {
+                        GameObject generated = GenerateObject(part, buildData);
+                        if (generated != null) {
+                            generatedObjects[i] = generated;
+                        }
+                    }
                 }
 
-                foreach (ObjectData part in connectingObjects)
-                    GenerateObject(part, buildData);
+                foreach (KeyValuePair<int, ObjectData> part in connectingObjects) {
+                    GameObject generated = GenerateObject(part.Value, buildData);
+                    if (generated != null) {
+                        generatedObjects[part.Key] = generated;
+                    }
+                }
+
+                ChainGuideRuntimeAuthoring.LoadBuildData(
+                    buildData.chainGuides,
+                    index => generatedObjects.ContainsKey(index) ? generatedObjects[index] : null);
+
+                ChainManager.LoadBuildData(
+                    buildData.chains,
+                    index => generatedObjects.ContainsKey(index) ? generatedObjects[index] : null);
 
             }
             
@@ -83,14 +124,35 @@ namespace Protobot.Builds {
 
         private static GameObject GenerateObject(ObjectData objectData, BuildData buildData)
         {
-            GameObject generatedObject = PartsManager.GeneratePart(objectData.partId, objectData.GetPos(), objectData.GetRot());
+            GameObject generatedObject = null;
+            if (!string.IsNullOrWhiteSpace(objectData.customDefinitionId)) {
+                generatedObject = CustomPartGenerator.Generate(
+                    objectData.customDefinitionId,
+                    objectData.GetPos(),
+                    objectData.GetRot(),
+                    objectData.customInstanceId);
+            }
+            else {
+                generatedObject = PartsManager.GeneratePart(objectData.partId, objectData.GetPos(), objectData.GetRot());
+            }
+
+            if (generatedObject == null) {
+                return null;
+            }
+
             //there are only 2 versions of Protobot legacy publicly released that I could find most before Beta 1.3.1 are just guesses
             string[] versionsNoColor = new string[] {"1.0", "1.1", "1.1.1", "Beta 1.2", "Beta 1.3", "Beta 1.3.1", "1.3.2", "1.3.3", "1.3.4" };
             //Debug.Log(buildData.version);    
             if(!versionsNoColor.Contains(buildData.version) && buildData.version != null)
             { 
-                generatedObject.GetComponent<Renderer>().material.color = objectData.GetColor();
+                var renderer = generatedObject.GetComponent<Renderer>();
+                var color = objectData.GetColor();
+                if (renderer != null && renderer.sharedMaterial != null && renderer.sharedMaterial.color != color)
+                    renderer.material.color = color;
             }
+            var savedView = generatedObject.GetComponent<SavedObject>();
+            RobotDocument.RestoreIdentity(savedView, objectData.instanceId);
+            RobotDocument.Synchronize(savedView);
             return generatedObject;
         }
             
@@ -129,7 +191,7 @@ namespace Protobot.Builds {
                 yRot = cam.lookAngle.y,
                 zRot = cam.lookAngle.z,
 
-                zoom = cam.focusDistance,
+                zoom = cam.SavedZoom(projectionSwitcher.isOrtho),
 
                 isOrtho = projectionSwitcher.isOrtho
             };
@@ -138,36 +200,35 @@ namespace Protobot.Builds {
             List<GameObject> sceneObjs = PartsManager.FindLoadedObjects();
 
             ObjectData[] newParts = new ObjectData[sceneObjs.Count];
+            Dictionary<GameObject, int> objectIndices = new Dictionary<GameObject, int>();
+            var customDefinitionIds = new HashSet<string>();
+            var chainEditor = UnityEngine.Object.FindObjectOfType<InsertChainTool>();
 
             for (int i = 0; i < newParts.Length; i++) {
                 Transform tForm = sceneObjs[i].transform;
                 SavedObject savedData = tForm.GetComponent<SavedObject>();
-                Renderer savedColor = tForm.GetComponent<Renderer>();
+                RobotDocument.Synchronize(savedData, PartChange.Pose | PartChange.Appearance | PartChange.Metadata);
+                var record = savedData.DocumentPart;
+                var position = record.Position;
+                var rotation = record.Rotation;
+                if (chainEditor != null) chainEditor.GetCommittedTransform(tForm, ref position, ref rotation);
+                newParts[i] = record.Export(position, rotation);
 
-                var position = tForm.position;
-                var eulerAngles = tForm.eulerAngles;
-                newParts[i] = new ObjectData {
-                    partId = savedData.id,
-                    states = savedData.state,
+                if (!string.IsNullOrWhiteSpace(savedData.customDefinitionId)) {
+                    customDefinitionIds.Add(savedData.customDefinitionId);
+                }
 
-                    xPos = position.x,
-                    yPos = position.y,
-                    zPos = position.z,
-
-                    xRot = eulerAngles.x,
-                    yRot = eulerAngles.y,
-                    zRot = eulerAngles.z,
-
-                    rColor = savedColor.material.color.r,
-                    bColor = savedColor.material.color.b,
-                    gColor = savedColor.material.color.g,
-                };
+                objectIndices[sceneObjs[i]] = i;
             }
 
+            CustomPartDefinition[] customDefinitions = CustomPartRegistry.GetDefinitions(customDefinitionIds);
 
             return new BuildData {
                 camera = newCameraData,
                 parts = newParts,
+                chainGuides = ChainGuideRuntimeAuthoring.ExportBuildData(obj => objectIndices.ContainsKey(obj) ? objectIndices[obj] : -1),
+                chains = ChainManager.ExportBuildData(obj => objectIndices.ContainsKey(obj) ? objectIndices[obj] : -1),
+                customDefinitions = customDefinitions
             };
         }
     }

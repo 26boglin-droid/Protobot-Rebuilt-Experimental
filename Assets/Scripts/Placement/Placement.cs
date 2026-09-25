@@ -40,6 +40,9 @@ namespace Protobot {
         [SerializeField] private UnityEvent OnStopRotate;
 
         private Displacement currentDisplacement;
+        private Matrix4x4 previewPose;
+        private Mesh previewMesh;
+        private bool previewVisible;
 
         [SerializeField] private Camera refCamera = null; //used for dot product angle comparison
 
@@ -137,12 +140,24 @@ namespace Protobot {
                 }
             }
 
-            meshRenderer.enabled = placing;
+            if (meshRenderer.enabled != placing) meshRenderer.enabled = placing;
+        }
+
+        private void LateUpdate() {
+            if (!placing && !previewVisible) return;
+            var pose = transform.localToWorldMatrix;
+            var mesh = meshFilter.sharedMesh;
+            if (previewVisible != placing || previewPose != pose || previewMesh != mesh) {
+                previewVisible = placing; previewPose = pose; previewMesh = mesh;
+                ViewportPresentation.Changed();
+                WorldShadowCache.Changed();
+            }
         }
 
         public void StartPlacing(PlacementData newPlacementData) {
             currentPlacementData = newPlacementData;
             placing = true;
+            ViewportPresentation.Changed();
             rotating = false;
             meshFilter.mesh = newPlacementData.GetDisplayMesh();
 
@@ -165,6 +180,7 @@ namespace Protobot {
                 
                 if (!value && x.layer == PLACEMENT_LAYER)
                     x.layer = 0;
+                RobotRenderer.Invalidate(x);
             });
         }
 
@@ -175,7 +191,7 @@ namespace Protobot {
         }
 
         public void StopPlacing() {
-            if (currentPlacementData.TryParse(out GameObjectPlacementData objPlaceData))
+            if (currentPlacementData != null && currentPlacementData.TryParse(out GameObjectPlacementData objPlaceData))
                 SetPlacementLayer(objPlaceData.GetGameObject(), false);
             
             transform.rotation = Quaternion.identity;
@@ -185,13 +201,31 @@ namespace Protobot {
         }
 
         private void Place() {
+            bool isGeneratedPlacement = currentPlacementData is IGeneratedPlacementData;
             bool isPartPlacement = currentPlacementData.GetType() == typeof(PartPlacementData);
             bool isGameObjectPlacement = currentPlacementData.GetType() == typeof(GameObjectPlacementData);
 
             var displaceRot = currentDisplacement.rotation.Orientation;
             var displacePos = currentDisplacement.translation.Position;
             
-            if (isPartPlacement) {
+            if (isGeneratedPlacement) {
+                var generatedPlacementData = (IGeneratedPlacementData)currentPlacementData;
+                GameObject placedObj = generatedPlacementData.GeneratePlacedObject(displacePos, displaceRot);
+                if (placedObj != null) {
+                    PartListOutput partListOutput = FindObjectOfType<PartListOutput>();
+                    if (partListOutput != null) {
+                        partListOutput.CalculatePartsList();
+                    }
+
+                    ObjectElement prevElement = new ObjectElement(placedObj);
+                    prevElement.existing = false;
+                    StateSystem.AddElement(prevElement);
+
+                    ObjectElement objElement = new ObjectElement(placedObj);
+                    StateSystem.AddState(objElement);
+                }
+            }
+            else if (isPartPlacement) {
                 var generator = ((PartPlacementData)currentPlacementData).partGenerator;
                 GameObject placedObj = generator.Generate(displacePos, displaceRot);
 
