@@ -113,6 +113,7 @@ namespace Protobot {
             }
 
             partTypes = loadedPartTypes.ToArray();
+            OverrideCatalog.Register();
         }
 
         public static PartType GetPartType(string id) {
@@ -185,13 +186,12 @@ namespace Protobot {
 
         /// <Summary> Returns a list of all loaded parts in the current scene </Summary>
         public static List<GameObject> FindLoadedObjects() {
-            return GameObject.FindObjectsOfType<SavedObject>().Select(x => x.gameObject).ToList();
+            return RobotDocument.GetObjects();
         }
 
         /// <Summary> Destroys all loaded parts in the current scene </Summary>
         public static void DestroyLoadedObjects() {
-            foreach (var obj in FindLoadedObjects())
-                GameObject.Destroy(obj);
+            RobotDocument.Clear();
         }
 
         private static PartType GetOrCreateChainToolPart(List<PartType> loadedPartTypes) {
@@ -234,6 +234,8 @@ namespace Protobot {
         }
 
         private static Sprite ResolveChainIcon(IEnumerable<PartType> loadedPartTypes) {
+            var icon = Resources.Load<Sprite>("Chain/ChainIcon");
+            if (icon != null) return icon;
             PartType sprocketPart = loadedPartTypes.FirstOrDefault(p =>
                 p != null
                 && !string.IsNullOrWhiteSpace(p.id)
